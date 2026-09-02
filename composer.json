@@ -1,0 +1,42 @@
+{
+    "$schema": "https://getcomposer.org/schema.json",
+    "name": "simone-bianco/process-supervisor-laravel",
+    "type": "library",
+    "description": "Laravel control plane and installer for Process Supervisor.",
+    "license": "MIT",
+    "require": {
+        "php": "^8.4",
+        "dragonmantank/cron-expression": "^3.6",
+        "laravel/framework": "^12.0|^13.0",
+        "symfony/process": "^7.2|^8.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.27",
+        "phpunit/phpunit": "^12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "SimoneBianco\\ProcessSupervisorLaravel\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "SimoneBianco\\ProcessSupervisorLaravel\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "SimoneBianco\\ProcessSupervisorLaravel\\ProcessSupervisorServiceProvider"
+            ]
+        }
+    },
+    "suggest": {
+        "laravel/reverb": "Required only when supervising Laravel Reverb."
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
