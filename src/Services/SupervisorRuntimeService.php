@@ -254,6 +254,28 @@ final readonly class SupervisorRuntimeService
         return 0;
     }
 
+    public function isQuiescent(): bool
+    {
+        return $this->controlLock->run(function (): bool {
+            $status = $this->safeStatus();
+            if (! in_array($status['summary'] ?? null, ['stopped', 'disabled'], true)) {
+                return false;
+            }
+            foreach ((array) ($status['groups'] ?? []) as $group) {
+                if (! is_array($group) || (int) ($group['desired_processes'] ?? 0) > 0) {
+                    return false;
+                }
+                foreach ((array) ($group['instances'] ?? []) as $instance) {
+                    if (is_array($instance) && ! in_array($instance['state'] ?? null, ['stopped'], true)) {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        });
+    }
+
     private function assertEnabled(): void
     {
         if (! $this->availability->enabled()) {

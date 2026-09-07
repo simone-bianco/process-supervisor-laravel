@@ -8,8 +8,13 @@ use RuntimeException;
 
 final readonly class SupervisorRuntimePaths
 {
+    public function __construct(private ?SupervisorRuntimeContext $context = null) {}
+
     public function root(): string
     {
+        if ($this->context !== null) {
+            return rtrim(str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $this->context->runtimeRoot), DIRECTORY_SEPARATOR);
+        }
         $configured = config('process-supervisor.runtime_root');
         if (! is_string($configured) || trim($configured) === '') {
             throw new RuntimeException('The Laravel supervisor runtime root is not configured.');

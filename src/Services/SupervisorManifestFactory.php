@@ -16,11 +16,39 @@ final readonly class SupervisorManifestFactory
         private SupervisorCronExpression $cron,
         private TimezoneProvider $applicationTimezone,
         private SupervisorPhpExecutableResolver $phpExecutable,
+        private ?SupervisorRuntimeContext $context = null,
     ) {}
+
+    public function forContext(SupervisorRuntimeContext $context): self
+    {
+        return new self(
+            $this->paths instanceof SupervisorRuntimePaths ? new SupervisorRuntimePaths($context) : $this->paths,
+            $this->environment,
+            $this->horizon,
+            $this->cron,
+            $this->applicationTimezone,
+            $this->phpExecutable,
+            $context,
+        );
+    }
 
     /** @return list<array{id:string,label:string,source:string,default_processes:int,max_processes:int,group:array<string,mixed>}> */
     public function definitions(): array
     {
+        if ($this->context !== null) {
+            $definitions = [];
+            if ($this->context->queueEnabled) {
+                $definitions[] = $this->queueDefinition($this->context->queue, 'context');
+            }
+            if ($this->context->schedulerEnabled) {
+                $definitions[] = $this->schedulerDefinition((array) config('process-supervisor.scheduler', []));
+            }
+            if ($this->context->reverbEnabled && class_exists(ReverbServiceProvider::class)) {
+                $definitions[] = $this->reverbDefinition((array) config('process-supervisor.reverb', []));
+            }
+
+            return $definitions;
+        }
         $horizon = $this->horizon->projection();
         $profiles = $horizon['profiles'];
         if ($profiles === []) {
@@ -52,11 +80,17 @@ final readonly class SupervisorManifestFactory
             }
         }
 
-        $runtime = [
-            'project_root' => realpath(base_path()) ?: base_path(),
-            'php_executable' => $this->phpExecutable->resolve(),
-            'child_environment' => $this->environment->values(),
-        ];
+        $runtime = $this->context === null
+            ? [
+                'project_root' => realpath(base_path()) ?: base_path(),
+                'php_executable' => $this->phpExecutable->resolve(),
+                'child_environment' => $this->environment->values(),
+            ]
+            : [
+                'project_root' => $this->context->projectRoot,
+                'php_executable' => $this->context->phpExecutable,
+                'child_environment' => $this->context->childEnvironment,
+            ];
         $runtimeChanged = is_array($current['runtime'] ?? null) && $current['runtime'] !== $runtime;
 
         $groups = [];
@@ -131,13 +165,13 @@ final readonly class SupervisorManifestFactory
     {
         $id = is_string($config['id'] ?? null) ? $config['id'] : 'scheduler';
         $cron = $this->cron->normalize(is_string($config['cron'] ?? null) ? $config['cron'] : '* * * * *');
-        $timezone = $this->applicationTimezone->effective();
+        $timezone = $this->context?->timezone ?? $this->applicationTimezone->effective();
 
         return [
             'id' => $id,
             'label' => is_string($config['label'] ?? null) ? $config['label'] : 'Laravel scheduler',
             'source' => 'config',
-            'capability_message' => "Cron is evaluated in {$timezone}. Missed minutes are not backfilled and schedule:run never overlaps itself.",
+            'capability_message' => null,
             'default_processes' => 1,
             'max_processes' => 1,
             'group' => [
