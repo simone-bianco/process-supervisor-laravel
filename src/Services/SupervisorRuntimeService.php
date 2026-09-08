@@ -22,6 +22,7 @@ final readonly class SupervisorRuntimeService
         private SupervisorDiagnosticsRecorder $diagnostics,
         private ReverbPortGuard $reverbPortGuard,
         private SupervisorStatusPresenter $presenter,
+        private ArtisanServicePortGuard $servicePortGuard,
     ) {}
 
     /** @return array<string, mixed> */
@@ -110,7 +111,11 @@ final readonly class SupervisorRuntimeService
         $this->controlLock->run(function () use ($enabled): void {
             $current = $this->readDesired();
             $revision = is_int($current['revision'] ?? null) ? $current['revision'] + 1 : 1;
-            $manifest = $this->manifests->make($enabled, $revision, $current);
+            // Disabling must remain possible without introducing new workload contracts.
+            $manifest = ! $enabled && is_array($current)
+                ? [...$current, 'enabled' => false, 'revision' => $revision, 'generated_at' => now()->toISOString(),
+                    'groups' => array_map(static fn (array $group): array => [...$group, 'desired_processes' => 0], $current['groups'])]
+                : $this->manifests->make($enabled, $revision, $current);
             $this->python->run('apply-desired', $manifest);
         });
     }
@@ -147,11 +152,11 @@ final readonly class SupervisorRuntimeService
             if ($action !== 'stop') {
                 $this->assertRecoveryNotRequired();
             }
-            if ($action === 'start' && ($definition['group']['kind'] ?? null) === 'reverb') {
-                $this->reverbPortGuard->assertAvailable();
-            }
-
             $current = $this->readDesired();
+            $previous = collect($current['groups'] ?? [])->firstWhere('id', $groupId);
+            if ($action === 'start' && (int) ($previous['desired_processes'] ?? 0) === 0) {
+                $this->assertStartable($definition);
+            }
             $revision = is_int($current['revision'] ?? null) ? $current['revision'] + 1 : 1;
             $preserveCurrent = $action === 'stop' && is_array($current) && ($current['enabled'] ?? false) === true;
             $manifest = $preserveCurrent
@@ -223,9 +228,7 @@ final readonly class SupervisorRuntimeService
                 if ($desired < 1) {
                     continue;
                 }
-                if (($definition['group']['kind'] ?? null) === 'reverb') {
-                    $this->reverbPortGuard->assertAvailable();
-                }
+                $this->assertStartable($definition);
                 $group['desired_processes'] = $desired;
                 $changed = true;
             }
@@ -252,6 +255,15 @@ final readonly class SupervisorRuntimeService
         }
 
         return 0;
+    }
+
+    private function assertStartable(array $definition): void
+    {
+        if ($definition['group']['kind'] === 'reverb') {
+            $this->reverbPortGuard->assertAvailable();
+        } elseif ($definition['group']['kind'] === 'artisan_service') {
+            $this->servicePortGuard->assertAvailable($definition);
+        }
     }
 
     public function isQuiescent(): bool

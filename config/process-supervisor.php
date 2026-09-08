@@ -71,5 +71,7 @@ return [
             'max_crashes' => 5,
         ],
     ],
+    // Trusted server configuration only: ID => label, command (no arguments), optional listen host/port.
+    'services' => [],
     'vue_package' => env('PROCESS_SUPERVISOR_VUE_PACKAGE', 'github:simone-bianco/process-supervisor-vue'),
 ];

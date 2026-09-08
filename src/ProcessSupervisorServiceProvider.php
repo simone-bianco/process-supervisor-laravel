@@ -8,12 +8,14 @@ use Illuminate\Support\ServiceProvider;
 use SimoneBianco\ProcessSupervisorLaravel\Commands\InstallProcessSupervisorCommand;
 use SimoneBianco\ProcessSupervisorLaravel\Commands\ProcessSupervisorControlCommand;
 use SimoneBianco\ProcessSupervisorLaravel\Commands\SyncPythonEngineCommand;
+use SimoneBianco\ProcessSupervisorLaravel\Contracts\ArtisanServiceProvider;
 use SimoneBianco\ProcessSupervisorLaravel\Contracts\AvailabilityProvider;
 use SimoneBianco\ProcessSupervisorLaravel\Contracts\DiagnosticsSink;
 use SimoneBianco\ProcessSupervisorLaravel\Contracts\ReverbPortProvider;
 use SimoneBianco\ProcessSupervisorLaravel\Contracts\SupervisorControlClient;
 use SimoneBianco\ProcessSupervisorLaravel\Contracts\TimezoneProvider;
 use SimoneBianco\ProcessSupervisorLaravel\Services\SupervisorPythonBridge;
+use SimoneBianco\ProcessSupervisorLaravel\Support\ConfigArtisanServiceProvider;
 use SimoneBianco\ProcessSupervisorLaravel\Support\ConfigAvailabilityProvider;
 use SimoneBianco\ProcessSupervisorLaravel\Support\ConfigReverbPortProvider;
 use SimoneBianco\ProcessSupervisorLaravel\Support\ConfigTimezoneProvider;
@@ -26,6 +28,7 @@ final class ProcessSupervisorServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(__DIR__.'/../config/process-supervisor.php', 'process-supervisor');
 
         $this->app->bindIf(AvailabilityProvider::class, ConfigAvailabilityProvider::class);
+        $this->app->bindIf(ArtisanServiceProvider::class, ConfigArtisanServiceProvider::class);
         $this->app->bindIf(TimezoneProvider::class, ConfigTimezoneProvider::class);
         $this->app->bindIf(ReverbPortProvider::class, ConfigReverbPortProvider::class);
         $this->app->bindIf(DiagnosticsSink::class, LogDiagnosticsSink::class);

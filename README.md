@@ -67,14 +67,17 @@ php artisan process-supervisor:control client
 
 ## Host contracts
 
-Applications may replace four small contracts:
+Applications may replace these small contracts:
 
 - `AvailabilityProvider`
 - `TimezoneProvider`
 - `ReverbPortProvider`
 - `DiagnosticsSink`
+- `ArtisanServiceProvider` — trusted singleton service definitions (ID, label, one Artisan command name, optional bind endpoint). Defaults to `process-supervisor.services`; never derive commands from HTTP input. Secondary `SupervisorRuntimeContext` instances do not inherit host services.
 
 Default implementations use config/logging. Local GPT replaces them with database Settings and Laravel Diagnostics adapters.
+
+Artisan services use the same generation, exact Job ownership, crash backoff and Stop/Restart controls as other groups. They cannot be scaled or accept arbitrary argv/environment. Bind conflicts reject Start before publishing desired state. A resident without the required workload capability must be drained/restarted before adding that kind; synchronize Python bytes first with `process-supervisor:sync-python`. Disabling preserves existing workload contracts so an engine upgrade cannot prevent shutdown. Integral JSON numbers do not count as static configuration changes.
 
 ## Python runtime
 

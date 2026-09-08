@@ -143,6 +143,13 @@ final readonly class SupervisorPythonBridge implements SupervisorControlClient
         }
         if ($decoded['ok'] !== true || $exitCode !== 0) {
             $error = is_array($decoded['error'] ?? null) ? $decoded['error'] : [];
+            if (($error['code'] ?? null) === 'RESIDENT_UPGRADE_REQUIRED') {
+                throw new SupervisorRuntimeException(
+                    'RESIDENT_UPGRADE_REQUIRED',
+                    'The resident engine must be updated before adding this service. Disable Process Supervisor in Dev Tools, wait for shutdown, then enable it again and start the required groups.',
+                    409,
+                );
+            }
             throw new SupervisorRuntimeException(
                 is_string($error['code'] ?? null) ? $error['code'] : 'SUPERVISOR_CONTROL_FAILED',
                 'The process supervisor could not complete the requested operation.',

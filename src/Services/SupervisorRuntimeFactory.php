@@ -45,6 +45,7 @@ final readonly class SupervisorRuntimeFactory
             $diagnostics,
             new ReverbPortGuard($diagnostics, $port),
             $presenter,
+            new ArtisanServicePortGuard,
         );
     }
 }
@@ -59,9 +60,7 @@ final readonly class ContextAvailabilityProvider implements AvailabilityProvider
 
 final readonly class ContextTimezoneProvider implements TimezoneProvider
 {
-    public function __construct(private string $timezone)
-    {
-    }
+    public function __construct(private string $timezone) {}
 
     public function effective(): string
     {
@@ -71,9 +70,7 @@ final readonly class ContextTimezoneProvider implements TimezoneProvider
 
 final readonly class ContextReverbPortProvider implements ReverbPortProvider
 {
-    public function __construct(private ?int $port)
-    {
-    }
+    public function __construct(private ?int $port) {}
 
     public function effective(): int
     {

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace SimoneBianco\ProcessSupervisorLaravel\Services;
 
 use Laravel\Reverb\ReverbServiceProvider;
+use SimoneBianco\ProcessSupervisorLaravel\Contracts\ArtisanServiceProvider;
 use SimoneBianco\ProcessSupervisorLaravel\Contracts\TimezoneProvider;
+use SimoneBianco\ProcessSupervisorLaravel\Exceptions\SupervisorRuntimeException;
 
 final readonly class SupervisorManifestFactory
 {
@@ -16,6 +18,7 @@ final readonly class SupervisorManifestFactory
         private SupervisorCronExpression $cron,
         private TimezoneProvider $applicationTimezone,
         private SupervisorPhpExecutableResolver $phpExecutable,
+        private ArtisanServiceProvider $services,
         private ?SupervisorRuntimeContext $context = null,
     ) {}
 
@@ -28,6 +31,7 @@ final readonly class SupervisorManifestFactory
             $this->cron,
             $this->applicationTimezone,
             $this->phpExecutable,
+            $this->services,
             $context,
         );
     }
@@ -65,6 +69,13 @@ final readonly class SupervisorManifestFactory
 
         if (class_exists(ReverbServiceProvider::class)) {
             $definitions[] = $this->reverbDefinition((array) config('process-supervisor.reverb', []));
+        }
+
+        foreach ($this->services->services() as $id => $service) {
+            if (in_array($id, array_column($definitions, 'id'), true)) {
+                throw new SupervisorRuntimeException('SUPERVISOR_SERVICE_INVALID', 'Duplicate configured service ID.', 503);
+            }
+            $definitions[] = $this->serviceDefinition($id, $service);
         }
 
         return $definitions;
@@ -214,6 +225,36 @@ final readonly class SupervisorManifestFactory
         ];
     }
 
+    private function serviceDefinition(string $id, array $service): array
+    {
+        $command = $service['command'] ?? null;
+        if (preg_match('/\A[a-z0-9][a-z0-9._-]{0,63}\z/', $id) !== 1
+            || ! is_string($command)
+            || preg_match('/\A[a-z][a-z0-9-]{0,63}:[a-z][a-z0-9:-]{0,127}\z/', $command) !== 1) {
+            throw new SupervisorRuntimeException('SUPERVISOR_SERVICE_INVALID', 'A service requires a valid ID and one Artisan command name without arguments.', 503);
+        }
+
+        return [
+            'id' => $id,
+            'label' => $service['label'],
+            'source' => 'service',
+            'capability_message' => $service['description'] ?? null,
+            'listen' => $service['listen'] ?? null,
+            'default_processes' => 1,
+            'max_processes' => 1,
+            'group' => [
+                'id' => $id,
+                'kind' => 'artisan_service',
+                'generation' => 0,
+                'desired_processes' => 0,
+                'stop_grace_seconds' => (float) ($service['stop_grace_seconds'] ?? 1),
+                'restart_policy' => $this->restartPolicy([]),
+                'queue' => null,
+                'service' => ['command' => $command],
+            ],
+        ];
+    }
+
     /** @return array{enabled:bool,base_delay_seconds:float,max_delay_seconds:float,crash_window_seconds:float,max_crashes:int} */
     private function restartPolicy(array $policy): array
     {
@@ -234,7 +275,9 @@ final readonly class SupervisorManifestFactory
             $actual[$key] = 0;
         }
 
-        return $expected === $actual;
+        // JSON persistence normalizes integral floats (1.0 -> 1). A wire round trip
+        // must not be mistaken for a configuration change or restart a sibling group.
+        return json_encode($expected, JSON_THROW_ON_ERROR) === json_encode($actual, JSON_THROW_ON_ERROR);
     }
 
     private function absolute(string $path): bool

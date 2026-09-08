@@ -174,7 +174,7 @@ final readonly class SupervisorStatusPresenter
         $desiredAge = null;
         if (is_string($desired['generated_at'] ?? null)) {
             try {
-                $desiredAge = Carbon::parse($desired['generated_at'])->diffInRealSeconds(now(), absolute: true);
+                $desiredAge = Carbon::parse($desired['generated_at'])->diffInUTCSeconds(now(), absolute: true);
             } catch (Throwable) {
                 $desiredAge = null;
             }
@@ -195,7 +195,7 @@ final readonly class SupervisorStatusPresenter
         }
 
         try {
-            $heartbeatAge = Carbon::parse($heartbeat)->diffInRealSeconds(now(), absolute: true);
+            $heartbeatAge = Carbon::parse($heartbeat)->diffInUTCSeconds(now(), absolute: true);
         } catch (Throwable) {
             return 'stale';
         }
