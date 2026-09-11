@@ -54,16 +54,11 @@ final readonly class SupervisorManifestFactory
             return $definitions;
         }
         $horizon = $this->horizon->projection();
-        $profiles = $horizon['profiles'];
-        if ($profiles === []) {
-            $native = $this->queueDefinition((array) config('process-supervisor.queue', []), 'config');
-            $native['capability_message'] = is_string($horizon['error'])
-                ? 'Horizon configuration is incompatible with Windows one-shot supervision; using the native queue profile.'
-                : null;
-            $definitions = [$native];
-        } else {
-            $definitions = array_map(fn (array $profile): array => $this->queueDefinition($profile, 'horizon'), $profiles);
-        }
+        $native = $this->queueDefinition((array) config('process-supervisor.queue', []), 'config');
+        $native['capability_message'] = is_string($horizon['error'])
+            ? 'Horizon configuration is incompatible with Windows one-shot supervision; using only the native queue profile.'
+            : null;
+        $definitions = [$native];
 
         $definitions[] = $this->schedulerDefinition((array) config('process-supervisor.scheduler', []));
 
@@ -76,6 +71,14 @@ final readonly class SupervisorManifestFactory
                 throw new SupervisorRuntimeException('SUPERVISOR_SERVICE_INVALID', 'Duplicate configured service ID.', 503);
             }
             $definitions[] = $this->serviceDefinition($id, $service);
+        }
+
+        foreach ($horizon['profiles'] as $profile) {
+            $definition = $this->queueDefinition($profile, 'horizon');
+            if (in_array($definition['id'], array_column($definitions, 'id'), true)) {
+                throw new SupervisorRuntimeException('HORIZON_CONFIG_UNSUPPORTED', 'Duplicate Horizon supervisor group ID.', 422);
+            }
+            $definitions[] = $definition;
         }
 
         return $definitions;
@@ -151,7 +154,9 @@ final readonly class SupervisorManifestFactory
             'label' => $label,
             'source' => $source,
             'default_processes' => $processes,
-            'max_processes' => (int) config('process-supervisor.max_processes', 8),
+            'max_processes' => $source === 'horizon'
+                ? $processes
+                : (int) config('process-supervisor.max_processes', 8),
             'group' => [
                 'id' => $id,
                 'kind' => 'queue_once',
