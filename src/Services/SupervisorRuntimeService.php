@@ -257,6 +257,19 @@ final readonly class SupervisorRuntimeService
         return 0;
     }
 
+    /** Cooperative managed services drain when Stop or Restart changes their original generation. */
+    public function desiredGeneration(string $groupId): ?int
+    {
+        foreach ((array) ($this->readDesired()['groups'] ?? []) as $group) {
+            if (is_array($group) && ($group['id'] ?? null) === $groupId) {
+                return ($group['desired_processes'] ?? 0) > 0 && is_int($group['generation'] ?? null)
+                    ? $group['generation'] : null;
+            }
+        }
+
+        return null;
+    }
+
     private function assertStartable(array $definition): void
     {
         if ($definition['group']['kind'] === 'reverb') {

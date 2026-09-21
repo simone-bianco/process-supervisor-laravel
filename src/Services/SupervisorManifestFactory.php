@@ -105,7 +105,8 @@ final readonly class SupervisorManifestFactory
                 'php_executable' => $this->context->phpExecutable,
                 'child_environment' => $this->context->childEnvironment,
             ];
-        $runtimeChanged = is_array($current['runtime'] ?? null) && $current['runtime'] !== $runtime;
+        $runtimeChanged = is_array($current['runtime'] ?? null)
+            && $this->wireValue($current['runtime']) !== $this->wireValue($runtime);
 
         $groups = [];
         foreach ($this->definitions() as $definition) {
@@ -282,7 +283,25 @@ final readonly class SupervisorManifestFactory
 
         // JSON persistence normalizes integral floats (1.0 -> 1). A wire round trip
         // must not be mistaken for a configuration change or restart a sibling group.
-        return json_encode($expected, JSON_THROW_ON_ERROR) === json_encode($actual, JSON_THROW_ON_ERROR);
+        return $this->wireValue($expected) === $this->wireValue($actual);
+    }
+
+    /** Object key order is not configuration; ordered lists and scalar types are. */
+    private function wireValue(array $value): string
+    {
+        $sort = function (mixed $item) use (&$sort): mixed {
+            if (! is_array($item)) {
+                return $item;
+            }
+            $item = array_map($sort, $item);
+            if (! array_is_list($item)) {
+                ksort($item, SORT_STRING);
+            }
+
+            return $item;
+        };
+
+        return json_encode($sort($value), JSON_THROW_ON_ERROR);
     }
 
     private function absolute(string $path): bool
