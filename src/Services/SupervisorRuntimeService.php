@@ -206,7 +206,13 @@ final readonly class SupervisorRuntimeService
         }
         $this->controlLock->run(function (): void {
             $this->assertEnabled();
-            $this->assertRecoveryNotRequired();
+            $status = $this->safeStatus();
+            if ($this->hasStaleResidentHeartbeat($status)) {
+                $recovery = $this->recoverLocked();
+                $recoveredStatus = $recovery['status'] ?? null;
+                $status = is_array($recoveredStatus) ? $recoveredStatus : $this->safeStatus();
+            }
+            $this->assertRecoveryNotRequiredStatus($status);
             $current = $this->readDesired();
             $revision = is_int($current['revision'] ?? null) ? $current['revision'] + 1 : 1;
             $manifest = $this->manifests->make(true, $revision, $current);
@@ -310,7 +316,12 @@ final readonly class SupervisorRuntimeService
 
     private function assertRecoveryNotRequired(): void
     {
-        $status = $this->safeStatus();
+        $this->assertRecoveryNotRequiredStatus($this->safeStatus());
+    }
+
+    /** @param array<string,mixed> $status */
+    private function assertRecoveryNotRequiredStatus(array $status): void
+    {
         if (($status['summary'] ?? null) === 'recovery_required') {
             throw new SupervisorRuntimeException(
                 'SUPERVISOR_RECOVERY_REQUIRED',
@@ -323,107 +334,124 @@ final readonly class SupervisorRuntimeService
     /** @return array<string, mixed> */
     public function recover(): array
     {
-        return $this->controlLock->run(function (): array {
-            $eligibility = $this->safeStatus();
-            if (($eligibility['summary'] ?? null) !== 'recovery_required') {
-                throw new SupervisorRuntimeException(
-                    'SUPERVISOR_RECOVERY_NOT_REQUIRED',
-                    'The Process Supervisor runtime is not awaiting recovery.',
-                    409,
-                );
-            }
+        return $this->controlLock->run(fn (): array => $this->recoverLocked());
+    }
 
-            $this->reconciliation->mark('recovery_in_progress');
-            try {
-                $gate = $this->python->run('disable-gate');
-                if (($gate['spawn_gate'] ?? null) !== 'disabled') {
-                    throw new SupervisorRuntimeException(
-                        'SUPERVISOR_RECOVERY_GATE_RESPONSE_INVALID',
-                        'Process Supervisor recovery could not confirm the closed spawn gate.',
-                        503,
-                    );
-                }
-            } catch (Throwable $exception) {
-                $this->reconciliation->mark('recovery_gate_close_failed');
-                $this->diagnostics->recordControlFailure(
-                    'process_supervisor.recovery_gate_close_failed',
-                    'Process Supervisor recovery could not close the spawn gate before authority repair.',
-                    [
-                        'reason_code' => 'recovery_gate_close_failed',
-                        'phase' => 'disable_gate',
-                        'exception' => $exception::class,
-                    ],
-                );
+    /**
+     * A stale heartbeat means the resident supervisor is no longer proving liveness.
+     * Start all may reclaim that exact-owned runtime instead of forcing a separate
+     * manual recovery step; every other recovery reason remains fail-closed.
+     *
+     * @param array<string,mixed> $status
+     */
+    private function hasStaleResidentHeartbeat(array $status): bool
+    {
+        return ($status['summary'] ?? null) === 'recovery_required'
+            && ($status['reason_code'] ?? null) === 'resident_heartbeat_stale';
+    }
 
+    /** @return array<string, mixed> */
+    private function recoverLocked(): array
+    {
+        $eligibility = $this->safeStatus();
+        if (($eligibility['summary'] ?? null) !== 'recovery_required') {
+            throw new SupervisorRuntimeException(
+                'SUPERVISOR_RECOVERY_NOT_REQUIRED',
+                'The Process Supervisor runtime is not awaiting recovery.',
+                409,
+            );
+        }
+
+        $this->reconciliation->mark('recovery_in_progress');
+        try {
+            $gate = $this->python->run('disable-gate');
+            if (($gate['spawn_gate'] ?? null) !== 'disabled') {
                 throw new SupervisorRuntimeException(
-                    'SUPERVISOR_RECOVERY_GATE_CLOSE_FAILED',
-                    'Runtime recovery could not prove the spawn gate is closed.',
+                    'SUPERVISOR_RECOVERY_GATE_RESPONSE_INVALID',
+                    'Process Supervisor recovery could not confirm the closed spawn gate.',
                     503,
                 );
             }
+        } catch (Throwable $exception) {
+            $this->reconciliation->mark('recovery_gate_close_failed');
+            $this->diagnostics->recordControlFailure(
+                'process_supervisor.recovery_gate_close_failed',
+                'Process Supervisor recovery could not close the spawn gate before authority repair.',
+                [
+                    'reason_code' => 'recovery_gate_close_failed',
+                    'phase' => 'disable_gate',
+                    'exception' => $exception::class,
+                ],
+            );
 
-            try {
-                $current = $this->readDesired();
-                $revision = is_int($current['revision'] ?? null) ? $current['revision'] + 1 : 1;
-                $manifest = $this->manifests->make(false, $revision, $current);
-                $this->python->run('apply-desired', $manifest);
-            } catch (Throwable $exception) {
-                $this->diagnostics->recordControlFailure(
-                    'process_supervisor.recovery_quiesce_failed',
-                    'Process Supervisor recovery could not publish a disabled desired state before salvage.',
-                    [
-                        'reason_code' => 'recovery_quiesce_failed',
-                        'phase' => 'apply_disabled_desired',
-                        'exception' => $exception::class,
-                    ],
-                );
-            }
+            throw new SupervisorRuntimeException(
+                'SUPERVISOR_RECOVERY_GATE_CLOSE_FAILED',
+                'Runtime recovery could not prove the spawn gate is closed.',
+                503,
+            );
+        }
 
-            try {
-                $this->python->run('shutdown');
-            } catch (Throwable $exception) {
-                $this->diagnostics->recordControlFailure(
-                    'process_supervisor.recovery_quiesce_failed',
-                    'Process Supervisor recovery could not complete the pre-recovery shutdown phase.',
-                    [
-                        'reason_code' => 'recovery_quiesce_failed',
-                        'phase' => 'shutdown',
-                        'exception' => $exception::class,
-                    ],
-                );
-            }
+        try {
+            $current = $this->readDesired();
+            $revision = is_int($current['revision'] ?? null) ? $current['revision'] + 1 : 1;
+            $manifest = $this->manifests->make(false, $revision, $current);
+            $this->python->run('apply-desired', $manifest);
+        } catch (Throwable $exception) {
+            $this->diagnostics->recordControlFailure(
+                'process_supervisor.recovery_quiesce_failed',
+                'Process Supervisor recovery could not publish a disabled desired state before salvage.',
+                [
+                    'reason_code' => 'recovery_quiesce_failed',
+                    'phase' => 'apply_disabled_desired',
+                    'exception' => $exception::class,
+                ],
+            );
+        }
 
-            $result = $this->python->run('recover');
-            if (! in_array($result['status'] ?? null, ['recovered', 'already_clean'], true)) {
-                throw new SupervisorRuntimeException('SUPERVISOR_RECOVERY_RESPONSE_INVALID', 'Supervisor recovery did not prove a clean runtime.', 503);
-            }
+        try {
+            $this->python->run('shutdown');
+        } catch (Throwable $exception) {
+            $this->diagnostics->recordControlFailure(
+                'process_supervisor.recovery_quiesce_failed',
+                'Process Supervisor recovery could not complete the pre-recovery shutdown phase.',
+                [
+                    'reason_code' => 'recovery_quiesce_failed',
+                    'phase' => 'shutdown',
+                    'exception' => $exception::class,
+                ],
+            );
+        }
 
-            $this->reconciliation->mark('recovery_desired_normalization_pending');
-            try {
-                $this->normalizeRecoveredDesiredLocked();
-            } catch (Throwable $exception) {
-                $this->reconciliation->mark('recovery_desired_normalization_failed');
-                $this->diagnostics->recordControlFailure(
-                    'process_supervisor.recovery_normalization_failed',
-                    'Process Supervisor recovery could not normalize desired state after proving runtime quiescence.',
-                    [
-                        'reason_code' => 'recovery_desired_normalization_failed',
-                        'enabled' => $this->availability->enabled(),
-                        'exception' => $exception::class,
-                    ],
-                );
+        $result = $this->python->run('recover');
+        if (! in_array($result['status'] ?? null, ['recovered', 'already_clean'], true)) {
+            throw new SupervisorRuntimeException('SUPERVISOR_RECOVERY_RESPONSE_INVALID', 'Supervisor recovery did not prove a clean runtime.', 503);
+        }
 
-                throw new SupervisorRuntimeException(
-                    'SUPERVISOR_RECOVERY_NORMALIZATION_FAILED',
-                    'Runtime recovery succeeded, but desired state could not be normalized. Recovery remains required.',
-                    503,
-                );
-            }
+        $this->reconciliation->mark('recovery_desired_normalization_pending');
+        try {
+            $this->normalizeRecoveredDesiredLocked();
+        } catch (Throwable $exception) {
+            $this->reconciliation->mark('recovery_desired_normalization_failed');
+            $this->diagnostics->recordControlFailure(
+                'process_supervisor.recovery_normalization_failed',
+                'Process Supervisor recovery could not normalize desired state after proving runtime quiescence.',
+                [
+                    'reason_code' => 'recovery_desired_normalization_failed',
+                    'enabled' => $this->availability->enabled(),
+                    'exception' => $exception::class,
+                ],
+            );
 
-            $this->reconciliation->clear();
+            throw new SupervisorRuntimeException(
+                'SUPERVISOR_RECOVERY_NORMALIZATION_FAILED',
+                'Runtime recovery succeeded, but desired state could not be normalized. Recovery remains required.',
+                503,
+            );
+        }
 
-            return ['result' => $result, 'status' => $this->safeStatus()];
-        });
+        $this->reconciliation->clear();
+
+        return ['result' => $result, 'status' => $this->safeStatus()];
     }
 
     private function normalizeRecoveredDesiredLocked(): void

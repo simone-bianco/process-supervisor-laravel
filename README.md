@@ -110,6 +110,8 @@ sequenceDiagram
 
 A direct recovery request against a healthy runtime is rejected instead of resetting capacity.
 
+`start-all` performs the same guarded recovery automatically when — and only when — the runtime is recovery-required because the resident heartbeat is stale. The exact-owned resident and its process tree are terminated before the configured groups are started again. Every other recovery reason still requires an explicit recovery request.
+
 ## Optional Vue UI
 
 ```bash
