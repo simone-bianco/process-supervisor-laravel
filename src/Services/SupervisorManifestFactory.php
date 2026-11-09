@@ -54,11 +54,21 @@ final readonly class SupervisorManifestFactory
             return $definitions;
         }
         $horizon = $this->horizon->projection();
-        $native = $this->queueDefinition((array) config('process-supervisor.queue', []), 'config');
-        $native['capability_message'] = is_string($horizon['error'])
-            ? 'Horizon configuration is incompatible with Windows one-shot supervision; using only the native queue profile.'
-            : null;
-        $definitions = [$native];
+        $queueConfigs = (array) config('process-supervisor.queues', []);
+        if ($queueConfigs === []) {
+            $queueConfigs = [(array) config('process-supervisor.queue', [])];
+        }
+        $definitions = [];
+        foreach ($queueConfigs as $queueConfig) {
+            $definition = $this->queueDefinition((array) $queueConfig, 'config');
+            if (in_array($definition['id'], array_column($definitions, 'id'), true)) {
+                throw new SupervisorRuntimeException('SUPERVISOR_QUEUE_DUPLICATE', 'Duplicate configured queue group ID.', 503);
+            }
+            $definition['capability_message'] = is_string($horizon['error'])
+                ? 'Horizon configuration is incompatible with Windows one-shot supervision; using only the native queue profile.'
+                : null;
+            $definitions[] = $definition;
+        }
 
         $definitions[] = $this->schedulerDefinition((array) config('process-supervisor.scheduler', []));
 

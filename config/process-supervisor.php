@@ -25,6 +25,10 @@ return [
     'shutdown_timeout_seconds' => 12,
     'max_processes' => 8,
     'control_lock_timeout_ms' => 5_000,
+    // Optional explicit list of queue groups. When non-empty it replaces the
+    // singular `queue` profile below, so one host can supervise several queues
+    // without a single slow queue blocking the others.
+    'queues' => [],
     'queue' => [
         'id' => 'queue-default',
         'label' => 'Laravel queue',
