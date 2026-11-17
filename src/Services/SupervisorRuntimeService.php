@@ -279,7 +279,7 @@ final readonly class SupervisorRuntimeService
     private function assertStartable(array $definition): void
     {
         if ($definition['group']['kind'] === 'reverb') {
-            $this->reverbPortGuard->assertAvailable();
+            $this->reverbPortGuard->prepareForStart();
         } elseif ($definition['group']['kind'] === 'artisan_service') {
             $this->servicePortGuard->assertAvailable($definition);
         }
@@ -342,7 +342,7 @@ final readonly class SupervisorRuntimeService
      * Start all may reclaim that exact-owned runtime instead of forcing a separate
      * manual recovery step; every other recovery reason remains fail-closed.
      *
-     * @param array<string,mixed> $status
+     * @param  array<string,mixed>  $status
      */
     private function hasStaleResidentHeartbeat(array $status): bool
     {
