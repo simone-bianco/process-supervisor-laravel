@@ -117,7 +117,7 @@ final readonly class ReverbPortGuard
                     Select-Object -ExpandProperty OwningProcess -Unique
             }
             # Allow a launcher with a short restart delay to reveal any replacement listener.
-            for ($attempt = 0; $attempt -lt 6; $attempt++) {
+            for ($attempt = 0; $attempt -lt 10; $attempt++) {
                 $stopped = $false
                 foreach ($owner in Get-Owners) {
                     if ($owner -le 4 -or $owner -eq $PID -or $owner -eq [int]$env:SUPERVISOR_REVERB_CALLER_PID) { continue }
@@ -138,7 +138,7 @@ final readonly class ReverbPortGuard
                     }
                 }
                 if (!$stopped) { break }
-                Start-Sleep -Milliseconds 1500
+                Start-Sleep -Milliseconds 1300
             }
             POWERSHELL;
 
@@ -149,7 +149,7 @@ final readonly class ReverbPortGuard
                 'SUPERVISOR_REVERB_BIND_PORT' => (string) $port,
                 'SUPERVISOR_REVERB_CALLER_PID' => (string) getmypid(),
             ],
-            timeout: 20,
+            timeout: 30,
         );
         $process->disableOutput();
 
